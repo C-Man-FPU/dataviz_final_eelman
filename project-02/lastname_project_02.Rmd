@@ -9,4 +9,223 @@ output:
 
 # Data Visualization Project 02
 
-_revised version of mini-project 02 goes here_
+# Importing Data Set
+
+Here I am importing the _spacex.csv_ data set into the markdown file, and initializing my libraries. This data set looks at launch data taken from 2010-0218. It contains information including date, launch site, payload size, mission outcome and more.
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(plotly)
+library(dplyr)
+
+spacex <- read_csv("../data/spacex.csv") %>%
+ mutate(
+    Date       = as.Date(Date, "%B %d, %Y"),         # e.g. "June 4, 2010"
+    Year       = year(Date),                         # extract integer year
+    success    = (`Mission Outcome` == "Success"),   # TRUE/FALSE
+    payload_kg = parse_number(`Payload Mass (kg)`)   # strip commas, make numeric
+  )
+glimpse(spacex)
+```
+
+## Data Summary
+
+In this section I filtered the SpaceX data to see:
+- Number of launches per year
+- Success rate per launch site
+- Average payload mass by booster version
+
+```{r, message=FALSE, warning=FALSE}
+#Launches per year
+launches <- spacex %>%
+  group_by(
+    Year = as.integer(format(as.Date(Date, "%B %d, %Y"),"%Y"))
+  ) %>%
+  summarize(
+    `Number of Launches` = n(),
+    `Success Rate`       = mean(success, na.rm = TRUE)
+  ) %>%
+  arrange(Year)
+
+launches
+
+
+#Success rate
+success <- spacex %>%
+  group_by(`Launch Site`) %>%
+  summarize(
+    `Total Launches` = n(),
+    `Success Rate`   = mean(`Mission Outcome` == "Success", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(`Total Launches`))
+
+success
+
+
+#Avg Mass
+payload <- spacex %>%
+  group_by(Booster = `Booster Version`) %>%
+  summarise(
+    `Average Payload (kg)` = mean(parse_number(`Payload Mass (kg)`), na.rm = TRUE),
+    `Number of Launches`   = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(`Average Payload (kg)`)) %>%
+  filter(!is.na(`Average Payload (kg)`))
+  
+payload  
+```
+
+## Interactive Data Visualization
+
+```{r, message=FALSE, warning=FALSE}
+spacex <- spacex %>% 
+  mutate(payload_kg = parse_number(`Payload Mass (kg)`))
+
+plot_ly(
+  data = spacex,
+  x    = ~as.numeric(`Flight Number`),
+  y    = ~payload_kg,
+  size = ~payload_kg,
+  color   = ~`Launch Site`,
+  text = ~paste0(
+    "Flight #: ", `Flight Number`, "<br>",
+    "Date: ", Date, "<br>",
+    "Booster: ", `Booster Version`, "<br>",
+    "Site: ", `Launch Site`, "<br>",
+    "Payload: ", payload_kg, " kg<br>",
+    "Outcome: ", `Mission Outcome`
+  ),
+  hoverinfo = "text",
+  mode = "markers"
+) %>%
+  layout(
+    title = "SpaceX Payload by Flight",
+    xaxis = list(title = "Flight Number"),
+    yaxis = list(title = "Payload Mass (kg)"),
+    legend = list(title = list(text = "<b>Launch Site</b>"))
+  )
+```
+
+## Spatial Visualization
+
+```{r, message=FALSE, warning=FALSE}
+
+world_shapes <- read_sf("../data/ne_110m_admin_0_countries/ne_110m_admin_0_countries.shp", quiet = TRUE) %>% 
+  filter(ISO_A3 == "USA")
+
+#site coords
+site_coords <- tribble(
+  ~site,           ~lon,        ~lat,
+  "CCAFS LC-40",  -80.577366,  28.561871,
+  "CCAFS SLC-40", -80.583333,  28.583330,
+  "KSC LC-39A",   -80.604333,  28.608389,
+  "VAFB SLC-4E", -120.610829,  34.632092
+)
+
+
+success_by_site <- spacex %>%
+  group_by(site = `Launch Site`) %>%
+  summarise(
+    total_launches = n(),
+    success_rate   = mean(`Mission Outcome` == "Success", na.rm = TRUE),
+    .groups = "drop"
+  )
+
+sites_sf <- success_by_site %>%
+  left_join(site_coords, by = "site") %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  mutate(
+    lon = lon + runif(n(), -0.1, 0.1),
+    lat = lat + runif(n(), -0.1, 0.1)
+  ) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = world_shapes, fill = "gray95", color = "gray80") +
+  geom_sf(
+    data = sites_sf,
+    aes(size = total_launches, color = success_rate),
+    alpha = 0.8
+  ) +
+  scale_size(range = c(1, 5)) +
+  scale_color_viridis_c(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title    = "SpaceX Launch Sites in the USA (2010–2021)",
+    subtitle = "Point size = total launches, color = success rate",
+    size     = "Total\nLaunches",
+    color    = "Success\nRate"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major = element_line(color = "white"),
+    plot.title       = element_text(face = "bold", size = 16),
+    plot.subtitle    = element_text(size = 12)
+  )
+
+```
+
+## Visualization of a Model
+
+```{r, message=FALSE, warning=FALSE}
+library(broom)       # for tidy()
+library(dotwhisker)  # for dwplot()
+
+
+# avoid lubridate::year() name clash
+spacex2 <- spacex %>%
+  rename(launch_year = Year)
+
+# fit the logistic model
+log_mod <- glm(
+  success ~ payload_kg + launch_year,
+  data   = spacex2,
+  family = binomial
+)
+
+ggplot(spacex, aes(x = payload_kg, y = as.numeric(success))) +
+  geom_jitter(
+  aes(x     = payload_kg,
+      y     = as.numeric(success),
+      colour = success),   # <-- map colour to the success flag
+  height = 0.02,
+  alpha  = 0.6,
+  size   = 2
+) +
+scale_colour_manual(
+  "Launch Outcome",
+  values = c(
+    "TRUE"  = "forestgreen",
+    "FALSE" = "firebrick"
+  )
+) +
+  stat_smooth(
+  method      = "glm",
+  method.args = list(family = "binomial"),
+  se          = TRUE,
+  color       = "forestgreen",
+  fill        = alpha("palegreen", 0.3)
+) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(title = "Success Probability vs. Payload Mass",
+       x = "Payload Mass (kg)",
+       y = "Probability of Success") +
+  theme_minimal()
+
+ggsave("figures/success_prob_vmass.png",
+       width = 6, height = 4, units = "in", dpi = 300)
+
+tidy(log_mod, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  dwplot(point_size = 3) +
+  labs(title = "Predictors of Launch Success",
+       x = "Log-Odds Coefficient",
+       y = "") +
+  theme_minimal()
+```
+
+The first visualization (“Success Probability vs. Payload Mass”) shows a fitted logistic curve overlaid on the raw jittered success/failure points. Notice how the blue line sits up near 100 % success for almost the entire range of payloads and only very slightly dips at the highest masses. In other words, payload mass really doesn’t effect whether a flight succeeds or not (the 95 % confidence ribbon is very wide at the far end but the mean curve is essentially flat).
+
+The second visualization (“Predictors of Launch Success”) is a classic coefficient‐plot of your glm. It shows the log-odds estimates (with confidence intervals) for both payload_kg and launch_year, excluding the intercept. Both coefficients sit close to zero and their intervals overlap zero, indicating neither payload nor year is a strong predictor of success.

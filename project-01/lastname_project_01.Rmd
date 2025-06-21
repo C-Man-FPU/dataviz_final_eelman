@@ -9,4 +9,137 @@ output:
 
 # Data Visualization Project 01
 
-_revised version of mini-project 01 goes here_
+## DATA SET
+
+In this document we will be looking at the __auto.csv data set__. This set contains information about different automotive vehicles, such as make and model, number of cylinders, MPG, etc. This mini project will aim to summarize this data, and provide several visual representations using ggplot2.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+
+auto <- read_csv("../data/Auto.csv")
+
+#Displaying the raw data
+glimpse(auto)
+summary(auto)
+
+```
+
+## Summarization
+
+Here you can see the summary of the number of cars in the __Auto__ data set, grouped by cylinder count. This table shows how many cars have 3, 4, 5, 6, or 8 cylinders.
+
+```{r}
+library(dplyr)
+
+auto_summary <- auto %>%
+  count(cylinders, name = "count") %>%
+  rename(
+    `Number of Cylinders` = cylinders,
+    `Number of Cars` = count
+  )
+
+auto_summary
+```
+
+In this summarization, we calculated the average, minimum, and maximum weights of vehicles in the _Auto_ data set. These values provide a quick overview of the vehicle weight distribution and establish a foundation for further analysis.
+
+```{r}
+auto %>%
+  summarise(
+    `Average Weight` = mean(weight, na.rm = TRUE),
+    `Minimum Weight` = min(weight, na.rm = TRUE),
+    `Maximum Weight` = max(weight, na.rm = TRUE)
+  )
+```
+
+In the final summary, you can find the data grouped by year to calculate the average weight, average acceleration, and number of cars for each year in the _Auto_ data set. These summary values provide insights into trends in vehicle characteristics over time.
+
+```{r}
+auto %>%
+  filter(horsepower > 100) %>%
+  mutate(`Year` = year) %>%  
+  group_by(`Year`) %>%
+  summarise(
+    `Average Weight` = mean(weight, na.rm = TRUE),
+    `Average Acceleration` = mean(acceleration, na.rm = TRUE),
+    `Number of Cars` = n()
+  )
+```
+
+##Data Visualization 
+
+These line charts show how vehicle weight and average acceleration times have changed from 1970 to 1982. Over the years, cars have generally gotten lighter and their acceleration times have increased.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+auto_summary <- auto %>%
+  filter(horsepower > 100) %>%
+  mutate(Year = year) %>%  # Adjust 'year' if necessary
+  group_by(Year) %>%
+  summarise(
+    `Average Weight` = mean(weight, na.rm = TRUE),
+    `Average Acceleration` = mean(acceleration, na.rm = TRUE),
+    `Number of Cars` = n()
+  )
+
+ggplot(auto_summary, aes(x = Year, y = `Average Weight`)) +
+  geom_line(color = "purple", size = 1) +
+  geom_point(color = "purple", size = 2) +
+  labs(
+    title = "Average Weight of Cars Over the Years",
+    x = "Year",
+    y = "Average Weight (lbs)"
+  ) +
+  theme_minimal()
+
+# Plot for Average Acceleration
+ggplot(auto_summary, aes(x = Year, y = `Average Acceleration`)) +
+  geom_line(color = "cyan", size = 1) +
+  geom_point(color = "cyan", size = 2) +
+  labs(
+    title = "Average Acceleration of Cars Over the Years",
+    x = "Year",
+    y = "Average Acceleration (seconds)"
+  ) +
+  theme_minimal()
+```
+
+This boxplot visualizes the spread of horsepower across vehicles with varying cylinder counts. As the number of cylinders increases, both the median and variability of horsepower rise, peaking with 8-cylinder vehicles that also exhibit the highest outliers. This visualization highlights a clear trend: more cylinders generally correspond to higher horsepower and greater performance potential.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+ggplot(auto, aes(x = factor(cylinders), y = horsepower)) +
+  geom_boxplot(fill = "violet", color = "black") +
+  labs(
+    title = "Horsepower Distribution by Cylinder Count",
+    x = "Number of Cylinders",
+    y = "Horsepower"
+  ) +
+  theme_minimal()
+```
+
+This histogram illustrates the distribution of vehicle weights in the data set, using the _viridis_ color palette to represent count density. The tallest bar corresponds to vehicles in the 2000 lbs range, indicating this weight category is the most common. The distribution skews right, with fewer heavier vehicles (over 4000 lbs), highlighting how most cars are lower weight.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+
+ggplot(auto, aes(x = weight, fill = ..count..)) +
+  geom_histogram(binwidth = 250, color = "black", boundary = 0) +
+  scale_fill_viridis_c(option = "plasma", direction = -1) +
+  labs(
+    title = "Distribution of Vehicle Weight",
+    x = "Vehicle Weight (lbs)",
+    y = "Count",
+    fill = "Count"
+  ) +
+  theme_minimal()
+
+ggsave("figures/histogram_weight.png",
+       width = 6, height = 4, units = "in", dpi = 300)
+```
